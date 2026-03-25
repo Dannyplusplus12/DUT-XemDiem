@@ -174,7 +174,8 @@
     <button id="scroll-to-top" onclick="scrollToTop()">↑</button>
 
     <script>
-        const API_BASE = 'http://localhost:8000';
+        // Auto-detect API base URL (works on localhost and deployed servers)
+        const API_BASE = window.location.origin;
         let allLeaderboardData = [];
         let currentContestId = null;
 
