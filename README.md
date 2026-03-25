@@ -67,3 +67,29 @@ git add .
 git commit -m "Initial backend for Railway"
 gh repo create multi-contest-backend --private --source=. --remote=origin --push
 ```
+
+## 6) Quy trình nhập 1 kỳ thi từ Excel (mẫu tiếng Anh định kỳ)
+
+1. Sao chép file Excel gốc vào `backend/excels/`. Mẫu hiện tại có tiêu đề bảng ở dòng 8 (`TT, SBD, Thẻ SV, Họ và tên, Lớp, NGHE, ĐỌC, TỔNG ĐIỂM, GHI CHÚ`).
+2. Cập nhật hoặc nhân bản `backend/scripts/sample_mapping.json` nếu cần đổi tên cột. Các trường đã khớp với cấu trúc trong ảnh (header ở dòng 8, dùng cột `NGHE` và `ĐỌC`).
+3. Chạy tiện ích chuẩn hóa để kiểm tra nhanh dữ liệu:
+   ```bash
+   cd backend
+   python -m venv .venv
+   . .venv/Scripts/Activate.ps1
+   pip install -r requirements.txt
+   python scripts/process_excel.py excels/ky-thi.xlsx scripts/sample_mapping.json excels/normalized.json
+   ```
+   File `excels/normalized.json` giúp đối chiếu thứ hạng/điểm trước khi đẩy lên server.
+4. Upload trực tiếp Excel lên backend đang chạy Railway (thay đường dẫn file cục bộ):
+   ```bash
+   curl -X POST "https://contestanalys-production.up.railway.app/upload-contest" ^
+     -H "accept: application/json" ^
+     -H "Content-Type: multipart/form-data" ^
+     -F "file=@D:/Dev/APP/DUT/backend/excels/ky-thi.xlsx" ^
+     -F "mapping_json=$(Get-Content scripts/sample_mapping.json -Raw)"
+   ```
+   Kết quả trả về `contest_id` → dùng cho giao diện tra cứu.
+5. Kiểm tra giao diện:
+   - Cá nhân: nhập `contest_id` + `SBD`.
+   - Bảng xếp hạng: nhập `contest_id`, chọn lớp nếu cần, dùng nút `Vị trí của tôi` để tô đậm thí sinh.

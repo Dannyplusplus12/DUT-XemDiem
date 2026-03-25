@@ -67,8 +67,9 @@ async def upload_contest(
         raise HTTPException(status_code=400, detail=f"JSON mapping không hợp lệ: {exc}") from exc
 
     content = await file.read()
+    header_row_index = mapping.header_row_number - 1 if mapping.header_row_number else 0
     try:
-        df = pd.read_excel(io.BytesIO(content))
+        df = pd.read_excel(io.BytesIO(content), header=header_row_index)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Không thể đọc file Excel: {exc}") from exc
 
@@ -87,6 +88,7 @@ async def upload_contest(
             "class_col": mapping.class_col,
             "component_score_cols": mapping.component_score_cols,
             "weights": mapping.weights or {},
+            "header_row_number": mapping.header_row_number,
         },
     )
     db.add(contest)

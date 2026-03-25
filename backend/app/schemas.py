@@ -12,6 +12,11 @@ class UploadContestMapping(BaseModel):
     class_col: str
     component_score_cols: list[str]
     weights: dict[str, float] | None = None
+    header_row_number: int | None = Field(
+        default=None,
+        ge=1,
+        description="Excel row number (1-based) chứa tiêu đề cột. Để trống nếu file đã chuẩn hóa.",
+    )
 
 
 class ContestItem(BaseModel):
