@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+# -*- coding: utf-8 -*-
 import io
 import json
 from typing import Iterable
 
 import pandas as pd
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .models import Contest, ContestResult
 from .schemas import UploadContestMapping
+
+
+class ValidationError(Exception):
+    """Custom validation error for Excel processing."""
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(self.message)
 
 
 def _normalize_component_scores(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
@@ -24,12 +31,12 @@ def _calculate_total_scores(component_df: pd.DataFrame, weights: dict[str, float
     weight_series = pd.Series(weights, dtype=float)
     missing = sorted(set(weight_series.index) - set(component_df.columns))
     if missing:
-        raise HTTPException(status_code=400, detail=f"Cột trọng số không hợp lệ: {', '.join(missing)}")
+        raise ValidationError(f"Cột trọng số không hợp lệ: {', '.join(missing)}")
 
     normalized_weights = weight_series.reindex(component_df.columns).fillna(0.0)
     weight_sum = normalized_weights.sum()
     if weight_sum <= 0:
-        raise HTTPException(status_code=400, detail="Tổng trọng số phải lớn hơn 0")
+        raise ValidationError("Tổng trọng số phải lớn hơn 0")
 
     normalized_weights /= weight_sum
     return component_df.mul(normalized_weights, axis=1).sum(axis=1)
@@ -42,24 +49,35 @@ def transform_excel(content: bytes, mapping: UploadContestMapping) -> pd.DataFra
     required_cols = [mapping.id_col, mapping.name_col, mapping.class_col, *mapping.component_score_cols]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
-        raise HTTPException(status_code=400, detail=f"Thiếu cột trong Excel: {', '.join(missing)}")
+        raise ValidationError(f"Thiếu cột trong Excel: {', '.join(missing)}")
 
     dataset = pd.DataFrame()
-    dataset["student_id"] = df[mapping.id_col].astype(str).str.strip()
-    dataset["full_name"] = df[mapping.name_col].astype(str).str.strip()
-    dataset["class_name"] = df[mapping.class_col].astype(str).str.strip()
+    dataset["student_id"] = df[mapping.id_col].fillna("").astype(str).str.strip()
+    dataset["full_name"] = df[mapping.name_col].fillna("").astype(str).str.strip()
+    dataset["class_name"] = df[mapping.class_col].fillna("").astype(str).str.strip()
 
     component_df = _normalize_component_scores(df, mapping.component_score_cols)
     dataset["component_scores"] = component_df.to_dict(orient="records")
     dataset["total_score"] = _calculate_total_scores(component_df, mapping.weights).round(2)
 
-    dataset = dataset[dataset["student_id"] != ""].copy()
+    # Filter out empty rows and NaN values
+    dataset = dataset[
+        (dataset["student_id"] != "") &
+        (dataset["student_id"] != "nan") &
+        (dataset["full_name"] != "") &
+        (dataset["class_name"] != "") &
+        (dataset["total_score"].notna())
+    ].copy()
+
     if dataset.empty:
-        raise HTTPException(status_code=400, detail="Không tìm thấy thí sinh hợp lệ")
+        raise ValidationError("Không tìm thấy thí sinh hợp lệ")
 
     dataset.sort_values(by=["total_score", "student_id"], ascending=[False, True], inplace=True)
-    dataset["global_rank"] = dataset["total_score"].rank(method="min", ascending=False).astype(int)
-    dataset["class_rank"] = dataset.groupby("class_name")["total_score"].rank(method="min", ascending=False).astype(int)
+    dataset = dataset.reset_index(drop=True)
+    dataset["global_rank"] = dataset["total_score"].rank(method="min", ascending=False).fillna(dataset.shape[0]).astype(int)
+
+    # Calculate class_rank: rank within each class by total_score
+    dataset["class_rank"] = dataset.groupby("class_name", sort=False)["total_score"].rank(method="min", ascending=False).astype(int)
 
     total = len(dataset)
     if total <= 1:

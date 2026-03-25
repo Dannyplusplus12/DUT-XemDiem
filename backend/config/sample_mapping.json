@@ -2,9 +2,9 @@
   "contest_name": "Kỳ thi tiếng Anh định kỳ",
   "description": "Kết quả kiểm tra tiếng Anh cho sinh viên",
   "header_row": 8,
-  "id_col": "SBD",
+  "id_col": "Thẻ SV",
   "name_col": "Họ và tên",
-  "class_col": "Lớp",
+  "class_col": "Lớp ",
   "component_score_cols": ["NGHE", "ĐỌC"],
   "weights": null
 }

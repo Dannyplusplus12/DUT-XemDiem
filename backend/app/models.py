@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
 
@@ -36,3 +37,16 @@ class ContestResult(Base):
     percentile = Column(Float, nullable=False)
 
     contest = relationship("Contest", back_populates="results")
+
+
+class FileSubmission(Base):
+    __tablename__ = "file_submissions"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    contest_name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    filename = Column(String(500), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    status = Column(String(50), default="pending", nullable=False)  # pending, imported, rejected
+    notes = Column(Text, nullable=True)
