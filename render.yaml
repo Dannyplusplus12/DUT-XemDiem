@@ -2,14 +2,13 @@ services:
   - type: web
     name: dut-exam-portal
     runtime: python
-    buildCommand: "cd backend && pip install --upgrade pip && pip install -r requirements.txt"
+    plan: free
+    buildCommand: "cd backend && pip install -r requirements.txt"
     startCommand: "cd backend && gunicorn -w 4 -b 0.0.0.0:$PORT app.main:app"
     envVars:
       - key: DATABASE_URL
         value: "sqlite:///./backend/contest.db"
       - key: FLASK_ENV
         value: "production"
-      - key: FLASK_APP
-        value: "app.main:app"
       - key: PYTHONUNBUFFERED
         value: "1"
