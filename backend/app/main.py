@@ -70,6 +70,37 @@ def health_check():
     return jsonify({'status': 'ok'})
 
 
+@app.route('/seed', methods=['POST'])
+def seed_database():
+    """Auto-seed database with sample data if empty"""
+    db: Session = SessionLocal()
+    try:
+        # Check if contests exist
+        count = db.query(Contest).count()
+        if count > 0:
+            return jsonify({'detail': 'Database đã có dữ liệu'}), 200
+
+        # Import sample data
+        sample_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 
+            '..', 'tools', 'TADK-1.xlsx'
+        )
+
+        if not os.path.exists(sample_file):
+            return jsonify({'detail': 'File mẫu không tìm thấy'}), 404
+
+        try:
+            import_excel_file(sample_file, 'Tiếng Anh - Mẫu dữ liệu', db)
+            return jsonify({'detail': f'✓ Import thành công {sample_file}'}), 200
+        except ValidationError as e:
+            return jsonify({'detail': f'Lỗi: {e.message}'}), 400
+
+    except Exception as e:
+        return jsonify({'detail': f'Lỗi: {str(e)}'}), 500
+    finally:
+        db.close()
+
+
 @app.route("/contests/upload", methods=["POST"])
 def upload_contest():
     db: Session = SessionLocal()
