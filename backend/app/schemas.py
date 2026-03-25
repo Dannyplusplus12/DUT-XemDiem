@@ -1,38 +1,37 @@
-import uuid
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Any
+from typing import List
 
 from pydantic import BaseModel, Field
 
 
 class UploadContestMapping(BaseModel):
-    contest_name: str = Field(..., min_length=1)
-    id_col: str
-    name_col: str
-    class_col: str
-    component_score_cols: list[str]
-    weights: dict[str, float] | None = None
-    header_row_number: int | None = Field(
-        default=None,
-        ge=1,
-        description="Excel row number (1-based) chứa tiêu đề cột. Để trống nếu file đã chuẩn hóa.",
-    )
+    contest_name: str = Field(..., description="Tên kỳ thi hiển thị trên hệ thống")
+    description: str | None = Field(default=None, description="Mô tả ngắn (tuỳ chọn)")
+    header_row: int = Field(default=8, ge=1, description="Dòng tiêu đề trong Excel (1-based)")
+    id_col: str = Field(default="SBD")
+    name_col: str = Field(default="Họ và tên")
+    class_col: str = Field(default="Lớp")
+    component_score_cols: List[str] = Field(default_factory=lambda: ["NGHE", "ĐỌC"])
+    weights: dict[str, float] | None = Field(default=None, description="Trọng số cho từng cột điểm thành phần")
 
 
-class ContestItem(BaseModel):
-    id: uuid.UUID
+class ContestSummary(BaseModel):
+    id: str
     name: str
+    description: str | None
     benchmark_score: float
     participant_count: int
     created_at: datetime
 
 
 class ContestListResponse(BaseModel):
-    contests: list[ContestItem]
+    contests: list[ContestSummary]
 
 
-class StudentResultResponse(BaseModel):
-    contest_id: uuid.UUID
+class PersonalResultResponse(BaseModel):
+    contest_id: str
     student_id: str
     full_name: str
     class_name: str
@@ -42,51 +41,28 @@ class StudentResultResponse(BaseModel):
     class_rank: int
     percentile: float
     benchmark_score: float
-    score_difference_from_benchmark: float
+    gap_from_average: float
 
 
 class LeaderboardRow(BaseModel):
     student_id: str
     full_name: str
     class_name: str
-    component_scores: dict[str, float]
     total_score: float
     global_rank: int
     class_rank: int
     percentile: float
+    component_scores: dict[str, float]
 
 
 class LeaderboardResponse(BaseModel):
-    contest_id: uuid.UUID
-    total_items: int
+    contest_id: str
     page: int
     page_size: int
+    total_items: int
     items: list[LeaderboardRow]
-
-
-class ClassSuggestionResponse(BaseModel):
-    classes: list[str]
-
-
-class FeedbackCreateRequest(BaseModel):
-    author_name: str
-    content: str
-    attachment_url: str | None = None
-
-
-class FeedbackItem(BaseModel):
-    id: uuid.UUID
-    author_name: str
-    content: str
-    attachment_url: str | None
-    status: str
-    created_at: datetime
-
-
-class FeedbackListResponse(BaseModel):
-    items: list[FeedbackItem]
 
 
 class MessageResponse(BaseModel):
     message: str
-    data: dict[str, Any] | None = None
+    detail: dict | None = None

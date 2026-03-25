@@ -1,95 +1,71 @@
 # Multi-Contest Analytics & Ranking System
 
-## Cấu trúc dự án
+> Phiên bản rework: backend FastAPI + SQLite/Pandas, công cụ nhập Excel dòng lệnh, frontend Flutter Web tiếng Việt.
 
-- `backend/`: FastAPI + Pandas + SQLAlchemy + PostgreSQL.
-- `frontend/`: Flutter Web giao diện tra cứu tiếng Việt.
-- `scripts/deploy_flutter_railway.sh`: Script deploy Flutter Web lên Railway.
+## Cấu trúc
 
-## 1) Backend
+- `backend/`: FastAPI + SQLAlchemy + SQLite (có thể chuyển sang PostgreSQL qua biến `DATABASE_URL`).
+- `backend/tools/import_excel.py`: tiện ích CLI xử lý Excel theo mẫu và nhập dữ liệu vào DB.
+- `frontend/`: Flutter Web với các nhãn cố định "Cổng tra cứu kết quả thi", "Cá nhân", "Bảng xếp hạng", "Thứ hạng theo lớp", "Vị trí của tôi", "Trích xuất báo cáo", "Chia sẻ kết quả".
 
-### Chạy local
+## 1. Backend
+
+### Cài đặt & chạy local
+
+Yêu cầu: Python 3.11+ (đã thêm vào PATH).
 
 ```bash
 cd backend
-python -m venv .venv
-. .venv/Scripts/Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 copy .env.example .env
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Mặc định `DATABASE_URL=sqlite:///./contest.db`. Muốn dùng DB khác, chỉnh trong `.env` và khởi động lại.
 
 ### API chính
 
-- `POST /upload-contest`
-- `GET /contests`
-- `GET /results/{contest_id}/{student_id}`
-- `GET /leaderboard/{contest_id}`
-- `GET /suggest-classes/{contest_id}`
-- `POST /contests/{contest_id}/feedback`
-- `GET /contests/{contest_id}/feedback`
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| GET | `/health` | Kiểm tra tình trạng service |
+| POST | `/contests/upload` | Upload file Excel (multipart) cùng `mapping_json` |
+| GET | `/contests` | Danh sách kỳ thi |
+| GET | `/contests/{contest_id}/results/{student_id}` | Kết quả cá nhân |
+| GET | `/contests/{contest_id}/leaderboard` | Bảng xếp hạng, hỗ trợ filter `class_name`, `page`, `page_size` |
 
-## 2) Frontend (Flutter Web)
+### Công cụ nhập Excel
+
+```bash
+cd backend
+python tools/import_excel.py data/ky-thi.xlsx \
+  --mapping config/mapping.json \
+  --contest-name "Kỳ thi tiếng Anh định kỳ"
+```
+
+- Nếu không truyền `--mapping`, script tự dùng cấu hình chuẩn: header dòng 8, cột `SBD`, `Họ và tên`, `Lớp`, `NGHE`, `ĐỌC`.
+- File mapping (JSON) khớp schema `UploadContestMapping` trong `backend/app/schemas.py`.
+- Sau khi chạy, script in `contest_id` để tra cứu trên giao diện.
+
+## 2. Frontend (Flutter Web)
 
 ```bash
 cd frontend
 flutter pub get
-flutter run -d chrome
+flutter run -d chrome --dart-define=BACKEND_URL=http://localhost:8000
 ```
 
-## 3) Docker
+- Khi build: `flutter build web --release --dart-define=BACKEND_URL=https://backend-domain`.
+- UI gồm 2 tab "Cá nhân" và "Bảng xếp hạng" đúng nhãn yêu cầu, có các nút "Vị trí của tôi", "Trích xuất báo cáo", "Chia sẻ kết quả".
 
-- Backend: `backend/Dockerfile`
-- Frontend: `frontend/Dockerfile`
+## 3. Quy trình mẫu
 
-## 4) Deploy Railway
+1. Chuẩn bị Excel kỳ thi (header ở dòng 8 với các cột `SBD`, `Họ và tên`, `Lớp`, `NGHE`, `ĐỌC`).
+2. Chạy `python tools/import_excel.py <file>.xlsx` để ghi dữ liệu.
+3. Ghi lại `contest_id` trả về.
+4. Mở Flutter Web (`flutter run ...`) và nhập `contest_id` + SBD/MSSV để tra cứu hoặc xem bảng xếp hạng.
 
-- Backend: dùng `backend/railway.toml`
-- Frontend: chạy script `scripts/deploy_flutter_railway.sh`
+## 4. Ghi chú deploy
 
-## 5) Tạo repo GitHub
-
-Tôi không thể tạo repo trực tiếp trên tài khoản GitHub của bạn, nhưng bạn có thể chạy:
-
-```bash
-git init
-git add .
-git commit -m "Initial commit: multi-contest analytics platform"
-gh repo create multi-contest-analytics --private --source=. --remote=origin --push
-```
-
-Nếu muốn tách riêng backend để deploy Railway, tạo repo thứ hai ngay trong thư mục `backend/`:
-
-```bash
-cd backend
-git init
-git add .
-git commit -m "Initial backend for Railway"
-gh repo create multi-contest-backend --private --source=. --remote=origin --push
-```
-
-## 6) Quy trình nhập 1 kỳ thi từ Excel (mẫu tiếng Anh định kỳ)
-
-1. Sao chép file Excel gốc vào `backend/excels/`. Mẫu hiện tại có tiêu đề bảng ở dòng 8 (`TT, SBD, Thẻ SV, Họ và tên, Lớp, NGHE, ĐỌC, TỔNG ĐIỂM, GHI CHÚ`).
-2. Cập nhật hoặc nhân bản `backend/scripts/sample_mapping.json` nếu cần đổi tên cột. Các trường đã khớp với cấu trúc trong ảnh (header ở dòng 8, dùng cột `NGHE` và `ĐỌC`).
-3. Chạy tiện ích chuẩn hóa để kiểm tra nhanh dữ liệu:
-   ```bash
-   cd backend
-   python -m venv .venv
-   . .venv/Scripts/Activate.ps1
-   pip install -r requirements.txt
-   python scripts/process_excel.py excels/ky-thi.xlsx scripts/sample_mapping.json excels/normalized.json
-   ```
-   File `excels/normalized.json` giúp đối chiếu thứ hạng/điểm trước khi đẩy lên server.
-4. Upload trực tiếp Excel lên backend đang chạy Railway (thay đường dẫn file cục bộ):
-   ```bash
-   curl -X POST "https://contestanalys-production.up.railway.app/upload-contest" ^
-     -H "accept: application/json" ^
-     -H "Content-Type: multipart/form-data" ^
-     -F "file=@D:/Dev/APP/DUT/backend/excels/ky-thi.xlsx" ^
-     -F "mapping_json=$(Get-Content scripts/sample_mapping.json -Raw)"
-   ```
-   Kết quả trả về `contest_id` → dùng cho giao diện tra cứu.
-5. Kiểm tra giao diện:
-   - Cá nhân: nhập `contest_id` + `SBD`.
-   - Bảng xếp hạng: nhập `contest_id`, chọn lớp nếu cần, dùng nút `Vị trí của tôi` để tô đậm thí sinh.
+- Backend: có thể dựng Docker hoặc deploy Railway bằng cách chạy `uvicorn app.main:app`. Bạn đồng nghiệp phụ trách deploy có thể dùng `DATABASE_URL` tùy môi trường.
+- Frontend: sau khi `flutter build web`, upload thư mục `build/web` lên hosting tĩnh và trỏ về backend public.

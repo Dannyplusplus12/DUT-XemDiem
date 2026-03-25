@@ -1,6 +1,7 @@
 {
   "contest_name": "Kỳ thi tiếng Anh định kỳ",
-  "header_row_number": 8,
+  "description": "Kết quả kiểm tra tiếng Anh cho sinh viên",
+  "header_row": 8,
   "id_col": "SBD",
   "name_col": "Họ và tên",
   "class_col": "Lớp",

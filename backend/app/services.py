@@ -1,72 +1,108 @@
 from __future__ import annotations
 
+import io
+import json
+from typing import Iterable
+
 import pandas as pd
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
 
+from .models import Contest, ContestResult
 from .schemas import UploadContestMapping
 
 
-REQUIRED_SYSTEM_COLUMNS = [
-    "student_id",
-    "full_name",
-    "class_name",
-]
+def _normalize_component_scores(df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
+    component_df = df[list(columns)].apply(pd.to_numeric, errors="coerce").fillna(0)
+    return component_df
 
 
-def _validate_mapping(df: pd.DataFrame, mapping: UploadContestMapping) -> None:
-    required_cols = [
-        mapping.id_col,
-        mapping.name_col,
-        mapping.class_col,
-        *mapping.component_score_cols,
-    ]
+def _calculate_total_scores(component_df: pd.DataFrame, weights: dict[str, float] | None) -> pd.Series:
+    if not weights:
+        return component_df.sum(axis=1)
 
-    missing = [col for col in required_cols if col not in df.columns]
+    weight_series = pd.Series(weights, dtype=float)
+    missing = sorted(set(weight_series.index) - set(component_df.columns))
     if missing:
-        raise HTTPException(status_code=400, detail=f"Thiếu cột trong file Excel: {', '.join(missing)}")
+        raise HTTPException(status_code=400, detail=f"Cột trọng số không hợp lệ: {', '.join(missing)}")
+
+    normalized_weights = weight_series.reindex(component_df.columns).fillna(0.0)
+    weight_sum = normalized_weights.sum()
+    if weight_sum <= 0:
+        raise HTTPException(status_code=400, detail="Tổng trọng số phải lớn hơn 0")
+
+    normalized_weights /= weight_sum
+    return component_df.mul(normalized_weights, axis=1).sum(axis=1)
 
 
-def transform_contest_dataframe(df: pd.DataFrame, mapping: UploadContestMapping) -> pd.DataFrame:
-    _validate_mapping(df, mapping)
+def transform_excel(content: bytes, mapping: UploadContestMapping) -> pd.DataFrame:
+    header_index = mapping.header_row - 1
+    df = pd.read_excel(io.BytesIO(content), header=header_index)
 
-    transformed = pd.DataFrame()
-    transformed["student_id"] = df[mapping.id_col].astype(str).str.strip()
-    transformed["full_name"] = df[mapping.name_col].astype(str).str.strip()
-    transformed["class_name"] = df[mapping.class_col].astype(str).str.strip()
+    required_cols = [mapping.id_col, mapping.name_col, mapping.class_col, *mapping.component_score_cols]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Thiếu cột trong Excel: {', '.join(missing)}")
 
-    component_scores = df[mapping.component_score_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
+    dataset = pd.DataFrame()
+    dataset["student_id"] = df[mapping.id_col].astype(str).str.strip()
+    dataset["full_name"] = df[mapping.name_col].astype(str).str.strip()
+    dataset["class_name"] = df[mapping.class_col].astype(str).str.strip()
 
-    if mapping.weights:
-        weight_series = pd.Series(mapping.weights, dtype=float)
-        unknown_weight_cols = set(weight_series.index) - set(mapping.component_score_cols)
-        if unknown_weight_cols:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cột trọng số không hợp lệ: {', '.join(sorted(unknown_weight_cols))}",
+    component_df = _normalize_component_scores(df, mapping.component_score_cols)
+    dataset["component_scores"] = component_df.to_dict(orient="records")
+    dataset["total_score"] = _calculate_total_scores(component_df, mapping.weights).round(2)
+
+    dataset = dataset[dataset["student_id"] != ""].copy()
+    if dataset.empty:
+        raise HTTPException(status_code=400, detail="Không tìm thấy thí sinh hợp lệ")
+
+    dataset.sort_values(by=["total_score", "student_id"], ascending=[False, True], inplace=True)
+    dataset["global_rank"] = dataset["total_score"].rank(method="min", ascending=False).astype(int)
+    dataset["class_rank"] = dataset.groupby("class_name")["total_score"].rank(method="min", ascending=False).astype(int)
+
+    total = len(dataset)
+    if total <= 1:
+        dataset["percentile"] = 100.0
+    else:
+        dataset["percentile"] = ((total - dataset["global_rank"]) / (total - 1) * 100).round(2)
+
+    return dataset.reset_index(drop=True)
+
+
+def persist_contest(db: Session, mapping: UploadContestMapping, dataset: pd.DataFrame) -> Contest:
+    benchmark = float(dataset["total_score"].mean().round(2))
+
+    contest = Contest(
+        name=mapping.contest_name,
+        description=mapping.description,
+        benchmark_score=benchmark,
+    )
+    db.add(contest)
+    db.flush()
+
+    results = []
+    for row in dataset.to_dict(orient="records"):
+        results.append(
+            ContestResult(
+                contest_id=contest.id,
+                student_id=row["student_id"],
+                full_name=row["full_name"],
+                class_name=row["class_name"],
+                component_scores=json.dumps(row["component_scores"], ensure_ascii=False),
+                total_score=float(row["total_score"]),
+                global_rank=int(row["global_rank"]),
+                class_rank=int(row["class_rank"]),
+                percentile=float(row["percentile"]),
             )
+        )
 
-        normalized_weights = pd.Series(0.0, index=mapping.component_score_cols)
-        normalized_weights.update(weight_series)
-        if normalized_weights.sum() <= 0:
-            raise HTTPException(status_code=400, detail="Tổng trọng số phải lớn hơn 0")
-        normalized_weights = normalized_weights / normalized_weights.sum()
-        transformed["total_score"] = component_scores.mul(normalized_weights, axis=1).sum(axis=1)
-    else:
-        transformed["total_score"] = component_scores.sum(axis=1)
+    db.add_all(results)
+    db.commit()
+    db.refresh(contest)
+    return contest
 
-    transformed["component_scores"] = component_scores.to_dict(orient="records")
 
-    transformed = transformed[transformed["student_id"] != ""].copy()
-    transformed.sort_values(by=["total_score", "student_id"], ascending=[False, True], inplace=True)
-
-    transformed["global_rank"] = transformed["total_score"].rank(method="min", ascending=False).astype(int)
-    transformed["class_rank"] = transformed.groupby("class_name")["total_score"].rank(method="min", ascending=False).astype(int)
-
-    total_students = len(transformed)
-    if total_students <= 1:
-        transformed["percentile"] = 100.0
-    else:
-        transformed["percentile"] = ((total_students - transformed["global_rank"]) / (total_students - 1) * 100).round(2)
-
-    transformed["total_score"] = transformed["total_score"].round(4)
-    return transformed
+def import_excel_file(db: Session, file_bytes: bytes, mapping: UploadContestMapping) -> Contest:
+    dataset = transform_excel(file_bytes, mapping)
+    return persist_contest(db, mapping, dataset)
